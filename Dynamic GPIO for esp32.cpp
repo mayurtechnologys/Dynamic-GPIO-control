@@ -6,8 +6,9 @@
 const char* ssid = "SENSORFLOW";
 const char* password = "12345678";
 
-AsyncWebServer server(80);
+AsyncWebServer server(8080);
 Ticker scheduler;
+Ticker resetScheduler;
 
 struct OperationArgs {
   int gpio;
@@ -16,6 +17,14 @@ struct OperationArgs {
 };
 
 OperationArgs operationArgs;
+
+void resetOperation() {
+  if (operationArgs.state == "high" || operationArgs.state.startsWith("pwm")) {
+    digitalWrite(operationArgs.gpio, LOW); // Reset pin to LOW after duration
+  } else if (operationArgs.state == "low") {
+    digitalWrite(operationArgs.gpio, HIGH); // Reset pin to HIGH after duration
+  }
+}
 
 void scheduleOperation() {
   pinMode(operationArgs.gpio, OUTPUT);
@@ -31,8 +40,7 @@ void scheduleOperation() {
   }
 
   if (operationArgs.duration > 0) {
-    delay(operationArgs.duration);
-    digitalWrite(operationArgs.gpio, LOW); // Reset pin to LOW after duration
+    resetScheduler.once_ms(operationArgs.duration, resetOperation); // Schedule reset after duration
   }
 }
 
@@ -48,7 +56,7 @@ void setup() {
   Serial.println("Connected to WiFi");
   Serial.println(WiFi.localIP());
 
-  // Set GPIO State
+  // Set GPIO
   server.on("/setgpio", HTTP_GET, [](AsyncWebServerRequest *request){
     if (request->hasParam("gpio") && request->hasParam("state")) {
       int gpio = request->getParam("gpio")->value().toInt();
@@ -88,28 +96,13 @@ void setup() {
           serializeJson(jsonResponse, response);
           request->send(200, "application/json", response);
         } else {
-          DynamicJsonDocument jsonResponse(1024);
-          jsonResponse["error"] = "Invalid state value";
-          jsonResponse["status"] = "failure";
-          String response;
-          serializeJson(jsonResponse, response);
-          request->send(400, "application/json", response);
+          request->send(400, "application/json", "{\"error\":\"Invalid state value\",\"status\":\"failure\"}");
         }
       } else {
-        DynamicJsonDocument jsonResponse(1024);
-        jsonResponse["error"] = "Invalid GPIO pin";
-        jsonResponse["status"] = "failure";
-        String response;
-        serializeJson(jsonResponse, response);
-        request->send(400, "application/json", response);
+        request->send(400, "application/json", "{\"error\":\"Invalid GPIO pin\",\"status\":\"failure\"}");
       }
     } else {
-      DynamicJsonDocument jsonResponse(1024);
-      jsonResponse["error"] = "GPIO or state parameter missing";
-      jsonResponse["status"] = "failure";
-      String response;
-      serializeJson(jsonResponse, response);
-      request->send(400, "application/json", response);
+      request->send(400, "application/json", "{\"error\":\"GPIO or state parameter missing\",\"status\":\"failure\"}");
     }
   });
 
@@ -138,7 +131,7 @@ void setup() {
       }
       request->send(200, "application/json", "{\"status\":\"success\"}");
     } else {
-      request->send(400, "application/json", "{\"error\":\"operations parameter missing\"}");
+      request->send(400, "application/json", "{\"error\":\"operations parameter missing\",\"status\":\"failure\"}");
     }
   });
 
@@ -154,7 +147,7 @@ void setup() {
       serializeJson(jsonResponse, response);
       request->send(200, "application/json", response);
     } else {
-      request->send(400, "application/json", "{\"error\":\"gpio parameter missing\"}");
+      request->send(400, "application/json", "{\"error\":\"gpio parameter missing\",\"status\":\"failure\"}");
     }
   });
 
@@ -169,7 +162,7 @@ void setup() {
       scheduler.once_ms(delayMs, scheduleOperation);
       request->send(200, "application/json", "{\"status\":\"scheduled\"}");
     } else {
-      request->send(400, "application/json", "{\"error\":\"gpio, state, or delay parameter missing\"}");
+      request->send(400, "application/json", "{\"error\":\"gpio, state, or delay parameter missing\",\"status\":\"failure\"}");
     }
   });
 
