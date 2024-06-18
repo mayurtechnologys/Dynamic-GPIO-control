@@ -1,6 +1,5 @@
 
 
-```markdown
 # ESP32 GPIO Controller
 
 The ESP32 GPIO Controller is a project that allows you to control the GPIO pins of an ESP32 via HTTP API calls. You can set the GPIO pins to HIGH, LOW, or PWM values using simple HTTP requests.
