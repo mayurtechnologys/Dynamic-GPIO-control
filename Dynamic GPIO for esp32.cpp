@@ -48,6 +48,71 @@ void setup() {
   Serial.println("Connected to WiFi");
   Serial.println(WiFi.localIP());
 
+  // Set GPIO State
+  server.on("/setgpio", HTTP_GET, [](AsyncWebServerRequest *request){
+    if (request->hasParam("gpio") && request->hasParam("state")) {
+      int gpio = request->getParam("gpio")->value().toInt();
+      String state = request->getParam("state")->value();
+
+      if (gpio >= 0 && gpio <= 33) { // Assuming GPIO 0-33 for ESP32
+        pinMode(gpio, OUTPUT); // Set the pin mode dynamically
+        if (state == "high") {
+          digitalWrite(gpio, HIGH);
+          DynamicJsonDocument jsonResponse(1024);
+          jsonResponse["gpio"] = gpio;
+          jsonResponse["state"] = "HIGH";
+          jsonResponse["status"] = "success";
+          String response;
+          serializeJson(jsonResponse, response);
+          request->send(200, "application/json", response);
+        } else if (state == "low") {
+          digitalWrite(gpio, LOW);
+          DynamicJsonDocument jsonResponse(1024);
+          jsonResponse["gpio"] = gpio;
+          jsonResponse["state"] = "LOW";
+          jsonResponse["status"] = "success";
+          String response;
+          serializeJson(jsonResponse, response);
+          request->send(200, "application/json", response);
+        } else if (state.startsWith("pwm")) {
+          int pwmValue = state.substring(3).toInt();
+          ledcAttachPin(gpio, gpio); // Attach PWM to the pin
+          ledcSetup(gpio, 5000, 8); // 5 kHz PWM with 8-bit resolution
+          ledcWrite(gpio, pwmValue);
+          DynamicJsonDocument jsonResponse(1024);
+          jsonResponse["gpio"] = gpio;
+          jsonResponse["state"] = "PWM";
+          jsonResponse["pwm_value"] = pwmValue;
+          jsonResponse["status"] = "success";
+          String response;
+          serializeJson(jsonResponse, response);
+          request->send(200, "application/json", response);
+        } else {
+          DynamicJsonDocument jsonResponse(1024);
+          jsonResponse["error"] = "Invalid state value";
+          jsonResponse["status"] = "failure";
+          String response;
+          serializeJson(jsonResponse, response);
+          request->send(400, "application/json", response);
+        }
+      } else {
+        DynamicJsonDocument jsonResponse(1024);
+        jsonResponse["error"] = "Invalid GPIO pin";
+        jsonResponse["status"] = "failure";
+        String response;
+        serializeJson(jsonResponse, response);
+        request->send(400, "application/json", response);
+      }
+    } else {
+      DynamicJsonDocument jsonResponse(1024);
+      jsonResponse["error"] = "GPIO or state parameter missing";
+      jsonResponse["status"] = "failure";
+      String response;
+      serializeJson(jsonResponse, response);
+      request->send(400, "application/json", response);
+    }
+  });
+
   // Batch Operations
   server.on("/batch", HTTP_GET, [](AsyncWebServerRequest *request){
     if (request->hasParam("operations")) {
