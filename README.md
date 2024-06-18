@@ -1,5 +1,4 @@
 
-
 # ESP32 GPIO Controller
 
 The ESP32 GPIO Controller is a project that allows you to control the GPIO pins of an ESP32 via HTTP API calls. You can set the GPIO pins to HIGH, LOW, or PWM values using simple HTTP requests.
@@ -9,7 +8,7 @@ The ESP32 GPIO Controller is a project that allows you to control the GPIO pins 
 - Control any GPIO pin on the ESP32 dynamically
 - Set GPIO pins to HIGH or LOW
 - Set PWM values on GPIO pins
-- Easy-to-use HTTP API
+- Easy-to-use HTTP API with JSON responses
 
 ## Requirements
 
@@ -24,6 +23,7 @@ Make sure you have the following libraries installed in your Arduino IDE:
 - `WiFi.h`
 - `ESPAsyncWebServer.h`
 - `AsyncTCP.h`
+- `ArduinoJson.h`
 
 You can install these libraries via the Library Manager in the Arduino IDE.
 
@@ -73,7 +73,20 @@ Replace `192.168.1.100` with the actual IP address of your ESP32.
 **Response:**
 
 - `200 OK`: If the request is successful.
+  ```json
+  {
+    "gpio": 4,
+    "state": "HIGH",
+    "status": "success"
+  }
+  ```
 - `400 Bad Request`: If the request parameters are missing or invalid.
+  ```json
+  {
+    "error": "Invalid GPIO pin",
+    "status": "failure"
+  }
+  ```
 
 ## License
 
@@ -81,9 +94,11 @@ This project is licensed under the MIT License. See the [LICENSE](LICENSE) file 
 
 ## Acknowledgments
 
-This project uses the ESPAsyncWebServer library for handling HTTP requests efficiently.
+This project uses the ESPAsyncWebServer and ArduinoJson libraries for handling HTTP requests efficiently and formatting responses as JSON.
 
 ---
 
 Feel free to contribute to this project by submitting issues or pull requests.
 ```
+
+This updated `README.md` file includes information about the JSON responses, providing clarity on the format of the responses for successful and failed requests.
