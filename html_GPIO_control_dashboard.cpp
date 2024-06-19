@@ -3,6 +3,9 @@
 #include <ArduinoJson.h>
 #include <Ticker.h>
 #include <Preferences.h>
+#include <esp_timer.h>
+#include <esp_wifi.h>
+#include <esp_heap_caps.h>
 
 const char* ssid = "SENSORFLOW";
 const char* password = "12345678";
@@ -20,9 +23,161 @@ struct OperationArgs {
 
 OperationArgs operationArgs;
 
+Ticker blinkTicker;
+int blinkPin = -1;
+int blinkInterval = 0;
+
+const char* html = R"rawliteral(
+<!DOCTYPE html>
+<html>
+<head>
+  <title>ESP32 GPIO Control</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      text-align: center;
+    }
+    .gpio-control {
+      display: inline-block;
+      margin: 20px;
+    }
+    .gpio-control button {
+      width: 100px;
+      height: 50px;
+      margin: 5px;
+    }
+    .operation {
+      margin: 20px;
+    }
+  </style>
+</head>
+<body>
+  <h1>ESP32 GPIO Control Dashboard</h1>
+  <div id="gpio-controls"></div>
+  <div class="operation">
+    <h3>Schedule Operation</h3>
+    GPIO: <input type="number" id="schedule-gpio" placeholder="GPIO">
+    State: <input type="text" id="schedule-state" placeholder="high/low/pwm">
+    Delay (ms): <input type="number" id="schedule-delay" placeholder="Delay in ms">
+    Duration (ms): <input type="number" id="schedule-duration" placeholder="Duration in ms">
+    <button onclick="scheduleOperation()">Schedule</button>
+  </div>
+  <div class="operation">
+    <h3>Batch Operation</h3>
+    Operations (JSON): <textarea id="batch-operations" rows="4" cols="50" placeholder='[{"gpio": 2, "state": "high"}, {"gpio": 3, "state": "low"}]'></textarea>
+    <button onclick="batchOperation()">Execute Batch</button>
+  </div>
+  <div class="operation">
+    <h3>Blink GPIO</h3>
+    GPIO: <input type="number" id="blink-gpio" placeholder="GPIO">
+    Interval (ms): <input type="number" id="blink-interval" placeholder="Interval in ms">
+    <button onclick="blinkGPIO()">Blink</button>
+  </div>
+
+  <script>
+    const gpioPins = [...Array(34).keys()]; // GPIO 0 to 33
+
+    function createControlElement(gpio) {
+      const container = document.createElement('div');
+      container.className = 'gpio-control';
+
+      const label = document.createElement('h3');
+      label.innerText = `GPIO ${gpio}`;
+      container.appendChild(label);
+
+      const highButton = document.createElement('button');
+      highButton.innerText = 'HIGH';
+      highButton.onclick = () => setGPIOState(gpio, 'high');
+      container.appendChild(highButton);
+
+      const lowButton = document.createElement('button');
+      lowButton.innerText = 'LOW';
+      lowButton.onclick = () => setGPIOState(gpio, 'low');
+      container.appendChild(lowButton);
+
+      const pwmInput = document.createElement('input');
+      pwmInput.type = 'number';
+      pwmInput.placeholder = 'PWM value';
+      pwmInput.onchange = () => setGPIOState(gpio, `pwm${pwmInput.value}`);
+      container.appendChild(pwmInput);
+
+      return container;
+    }
+
+    function setGPIOState(gpio, state) {
+      fetch(`/setgpio?gpio=${gpio}&state=${state}`)
+        .then(response => response.json())
+        .then(data => {
+          if (data.status === 'success') {
+            alert(`GPIO ${gpio} set to ${state.toUpperCase()}`);
+          } else {
+            alert(`Failed to set GPIO ${gpio}: ${data.error}`);
+          }
+        });
+    }
+
+    function scheduleOperation() {
+      const gpio = document.getElementById('schedule-gpio').value;
+      const state = document.getElementById('schedule-state').value;
+      const delay = document.getElementById('schedule-delay').value;
+      const duration = document.getElementById('schedule-duration').value;
+      fetch(`/schedule?gpio=${gpio}&state=${state}&delay=${delay}&duration=${duration}`)
+        .then(response => response.json())
+        .then(data => {
+          if (data.status === 'scheduled') {
+            alert(`Scheduled GPIO ${gpio} to ${state.toUpperCase()} after ${delay}ms for ${duration}ms`);
+          } else {
+            alert(`Failed to schedule GPIO ${gpio}: ${data.error}`);
+          }
+        });
+    }
+
+    function batchOperation() {
+      const operations = document.getElementById('batch-operations').value;
+      fetch(`/batch?operations=${encodeURIComponent(operations)}`)
+        .then(response => response.json())
+        .then(data => {
+          if (data.status === 'success') {
+            alert(`Batch operations executed successfully`);
+          } else {
+            alert(`Failed to execute batch operations: ${data.error}`);
+          }
+        });
+    }
+
+    function blinkGPIO() {
+      const gpio = document.getElementById('blink-gpio').value;
+      const interval = document.getElementById('blink-interval').value;
+      fetch(`/blink?gpio=${gpio}&interval=${interval}`)
+        .then(response => response.json())
+        .then(data => {
+          if (data.status === 'success') {
+            alert(`GPIO ${gpio} set to blink with interval ${interval}ms`);
+          } else {
+            alert(`Failed to set GPIO ${gpio} to blink: ${data.error}`);
+          }
+        });
+    }
+
+    function init() {
+      const gpioControls = document.getElementById('gpio-controls');
+      gpioPins.forEach(gpio => {
+        const controlElement = createControlElement(gpio);
+        gpioControls.appendChild(controlElement);
+      });
+    }
+
+    window.onload = init;
+  </script>
+</body>
+</html>
+)rawliteral";
+
 // Function prototypes
 void resetOperation();
 void scheduleOperation();
+void blinkOperation();
+void handleBlink();
 
 void resetOperation() {
   Serial.println("Resetting operation...");
@@ -81,132 +236,15 @@ void scheduleOperation() {
   preferences.end();
 }
 
-const char* html = R"rawliteral(
-<!DOCTYPE html>
-<html>
-<head>
-  <title>ESP32 GPIO Control</title>
-  <style>
-    body {
-      font-family: Arial, sans-serif;
-      text-align: center;
-    }
-    .gpio-control {
-      display: inline-block;
-      margin: 20px;
-    }
-    .gpio-control button {
-      width: 100px;
-      height: 50px;
-      margin: 5px;
-    }
-    .operation {
-      margin: 20px;
-    }
-  </style>
-</head>
-<body>
-  <h1>ESP32 GPIO Control Dashboard</h1>
-  <div id="gpio-controls"></div>
-  <div class="operation">
-    <h3>Schedule Operation</h3>
-    GPIO: <input type="number" id="schedule-gpio" placeholder="GPIO">
-    State: <input type="text" id="schedule-state" placeholder="high/low/pwm">
-    Delay (ms): <input type="number" id="schedule-delay" placeholder="Delay in ms">
-    Duration (ms): <input type="number" id="schedule-duration" placeholder="Duration in ms">
-    <button onclick="scheduleOperation()">Schedule</button>
-  </div>
-  <div class="operation">
-    <h3>Batch Operation</h3>
-    Operations (JSON): <textarea id="batch-operations" rows="4" cols="50" placeholder='[{"gpio": 2, "state": "high"}, {"gpio": 3, "state": "low"}]'></textarea>
-    <button onclick="batchOperation()">Execute Batch</button>
-  </div>
+void handleBlink() {
+  static bool state = false;
+  state = !state;
+  digitalWrite(blinkPin, state);
+}
 
-  <script>
-    const gpioPins = [...Array(34).keys()]; // GPIO 0 to 33
-
-    function createControlElement(gpio) {
-      const container = document.createElement('div');
-      container.className = 'gpio-control';
-
-      const label = document.createElement('h3');
-      label.innerText = `GPIO ${gpio}`;
-      container.appendChild(label);
-
-      const highButton = document.createElement('button');
-      highButton.innerText = 'HIGH';
-      highButton.onclick = () => setGPIOState(gpio, 'high');
-      container.appendChild(highButton);
-
-      const lowButton = document.createElement('button');
-      lowButton.innerText = 'LOW';
-      lowButton.onclick = () => setGPIOState(gpio, 'low');
-      container.appendChild(lowButton);
-
-      const pwmInput = document.createElement('input');
-      pwmInput.type = 'number';
-      pwmInput.placeholder = 'PWM value';
-      pwmInput.onchange = () => setGPIOState(gpio, `pwm${pwmInput.value}`);
-      container.appendChild(pwmInput);
-
-      return container;
-    }
-
-    function setGPIOState(gpio, state) {
-      fetch(`/setgpio?gpio=${gpio}&state=${state}`)
-        .then(response => response.json())
-        .then(data => {
-          if (data.status === 'success') {
-           // alert(`GPIO ${gpio} set to ${state.toUpperCase()}`);
-          } else {
-           // alert(`Failed to set GPIO ${gpio}: ${data.error}`);
-          }
-        });
-    }
-
-    function scheduleOperation() {
-      const gpio = document.getElementById('schedule-gpio').value;
-      const state = document.getElementById('schedule-state').value;
-      const delay = document.getElementById('schedule-delay').value;
-      const duration = document.getElementById('schedule-duration').value;
-      fetch(`/schedule?gpio=${gpio}&state=${state}&delay=${delay}&duration=${duration}`)
-        .then(response => response.json())
-        .then(data => {
-          if (data.status === 'scheduled') {
-           // alert(`Scheduled GPIO ${gpio} to ${state.toUpperCase()} after ${delay}ms for ${duration}ms`);
-          } else {
-           // alert(`Failed to schedule GPIO ${gpio}: ${data.error}`);
-          }
-        });
-    }
-
-    function batchOperation() {
-      const operations = document.getElementById('batch-operations').value;
-      fetch(`/batch?operations=${encodeURIComponent(operations)}`)
-        .then(response => response.json())
-        .then(data => {
-          if (data.status === 'success') {
-           // alert(`Batch operations executed successfully`);
-          } else {
-           // alert(`Failed to execute batch operations: ${data.error}`);
-          }
-        });
-    }
-
-    function init() {
-      const gpioControls = document.getElementById('gpio-controls');
-      gpioPins.forEach(gpio => {
-        const controlElement = createControlElement(gpio);
-        gpioControls.appendChild(controlElement);
-      });
-    }
-
-    window.onload = init;
-  </script>
- <h6> © Copyright By NIKOLAINDUSTRY | [MAYUR CHAVAN]</h6>
-</body>
-</html>
-)rawliteral";
+void blinkOperation() {
+  blinkTicker.attach_ms(blinkInterval, handleBlink);
+}
 
 void setup() {
   Serial.begin(115200);
@@ -358,6 +396,71 @@ void setup() {
       request->send(200, "application/json", "{\"status\":\"success\"}");
     } else {
       request->send(400, "application/json", "{\"error\":\"operations parameter missing\",\"status\":\"failure\"}");
+    }
+  });
+
+  // Blink GPIO
+  server.on("/blink", HTTP_GET, [](AsyncWebServerRequest *request){
+    if (request->hasParam("gpio") && request->hasParam("interval")) {
+      blinkPin = request->getParam("gpio")->value().toInt();
+      blinkInterval = request->getParam("interval")->value().toInt();
+
+      Serial.print("Setting GPIO ");
+      Serial.print(blinkPin);
+      Serial.print(" to blink with interval ");
+      Serial.println(blinkInterval);
+
+      pinMode(blinkPin, OUTPUT);
+      blinkOperation();
+      request->send(200, "application/json", "{\"status\":\"success\"}");
+    } else {
+      request->send(400, "application/json", "{\"error\":\"gpio or interval parameter missing\",\"status\":\"failure\"}");
+    }
+  });
+
+  // Read Analog Value
+  server.on("/readadc", HTTP_GET, [](AsyncWebServerRequest *request){
+    if (request->hasParam("gpio")) {
+      int gpio = request->getParam("gpio")->value().toInt();
+      int adcValue = analogRead(gpio);
+
+      DynamicJsonDocument jsonResponse(1024);
+      jsonResponse["gpio"] = gpio;
+      jsonResponse["adc_value"] = adcValue;
+      String response;
+      serializeJson(jsonResponse, response);
+      request->send(200, "application/json", response);
+    } else {
+      request->send(400, "application/json", "{\"error\":\"gpio parameter missing\",\"status\":\"failure\"}");
+    }
+  });
+
+  // System Status
+  server.on("/status", HTTP_GET, [](AsyncWebServerRequest *request){
+    DynamicJsonDocument jsonResponse(1024);
+    jsonResponse["uptime"] = esp_timer_get_time() / 1000000;
+    jsonResponse["free_heap"] = esp_get_free_heap_size();
+    jsonResponse["connected_clients"] = WiFi.softAPgetStationNum();
+
+    String response;
+    serializeJson(jsonResponse, response);
+    request->send(200, "application/json", response);
+  });
+
+  // Read GPIO State
+  server.on("/readgpio", HTTP_GET, [](AsyncWebServerRequest *request){
+    if (request->hasParam("gpio")) {
+      int gpio = request->getParam("gpio")->value().toInt();
+      int state = digitalRead(gpio);
+
+      DynamicJsonDocument jsonResponse(1024);
+      jsonResponse["gpio"] = gpio;
+      jsonResponse["state"] = state == HIGH ? "HIGH" : "LOW";
+      String response;
+      serializeJson(jsonResponse, response);
+      request->send(200, "application/json", response);
+    } else {
+      request->send(400, "application/json", "{\"error\":\"gpio parameter missing\",\"status\":\"failure\"}");
     }
   });
 
