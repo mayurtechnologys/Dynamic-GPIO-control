@@ -157,9 +157,9 @@ const char* html = R"rawliteral(
         .then(response => response.json())
         .then(data => {
           if (data.status === 'success') {
-            alert(`GPIO ${gpio} set to ${state.toUpperCase()}`);
+           // alert(`GPIO ${gpio} set to ${state.toUpperCase()}`);
           } else {
-            alert(`Failed to set GPIO ${gpio}: ${data.error}`);
+           // alert(`Failed to set GPIO ${gpio}: ${data.error}`);
           }
         });
     }
@@ -173,9 +173,9 @@ const char* html = R"rawliteral(
         .then(response => response.json())
         .then(data => {
           if (data.status === 'scheduled') {
-            alert(`Scheduled GPIO ${gpio} to ${state.toUpperCase()} after ${delay}ms for ${duration}ms`);
+           // alert(`Scheduled GPIO ${gpio} to ${state.toUpperCase()} after ${delay}ms for ${duration}ms`);
           } else {
-            alert(`Failed to schedule GPIO ${gpio}: ${data.error}`);
+           // alert(`Failed to schedule GPIO ${gpio}: ${data.error}`);
           }
         });
     }
@@ -186,9 +186,9 @@ const char* html = R"rawliteral(
         .then(response => response.json())
         .then(data => {
           if (data.status === 'success') {
-            alert(`Batch operations executed successfully`);
+           // alert(`Batch operations executed successfully`);
           } else {
-            alert(`Failed to execute batch operations: ${data.error}`);
+           // alert(`Failed to execute batch operations: ${data.error}`);
           }
         });
     }
@@ -203,6 +203,7 @@ const char* html = R"rawliteral(
 
     window.onload = init;
   </script>
+ <h6> © Copyright By NIKOLAINDUSTRY | [MAYUR CHAVAN]</h6>
 </body>
 </html>
 )rawliteral";
